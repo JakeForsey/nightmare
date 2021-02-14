@@ -5,6 +5,7 @@ import time
 import nevergrad as ng
 import numpy as np
 import matplotlib.pyplot as plt
+from skimage import metrics
 
 plt.style.use("ggplot")
 
@@ -12,6 +13,24 @@ plt.style.use("ggplot")
 def errors_to_image(a):
     out = (a - a.min()) / (a.max() - a.min()) * 255
     return out.astype(np.int)
+
+
+def rotate_patch(patch, rotation):
+    if rotation == 0:
+        patch = patch
+    elif rotation == 1:
+        patch = np.flip(patch, axis=0)
+    elif rotation == 2:
+        patch = np.flip(patch, axis=1)
+    elif rotation == 3:
+        patch = np.flip(np.flip(patch, axis=0), axis=1)
+    return patch
+
+
+def resize_patch(patch, scale):
+    image = Image.fromarray(patch)
+    image = image.resize((int(patch.shape[0] * scale), int(patch.shape[1] * scale)))
+    return np.array(image)
 
 
 class ImageSimilarityObjective:
@@ -50,24 +69,42 @@ class ImageSimilarityObjective:
             mutable_sigma=True,
         ).set_bounds(0, h - self.patch_size).set_integer_casting().set_mutation(sigma=100)
 
-        return ng.p.Tuple(seed_x, seed_y, target_x, target_y)
+        target_rotation = ng.p.Array(
+            init=np.random.randint(0, 3, self.n_patches),
+        ).set_bounds(0, 3).set_integer_casting()
+        target_scale = ng.p.Array(
+            # resize from 0.5 -> 1.5
+            init=np.random.random(self.n_patches) + 0.5
+        ).set_bounds(0.5, 1.5)
+
+        return ng.p.Tuple(seed_x, seed_y, target_x, target_y, target_rotation, target_scale)
 
     def score(self, x):
         out = self.resolve(x)
         errors = self.errors(out)
-        squared_errors = errors ** 2
-        return squared_errors.mean()
+        # squared_errors = errors ** 2
+        # return squared_errors.mean()
+        return metrics.normalized_root_mse(self.target_array, out)
 
     def errors(self, out):
         return np.abs(out.astype(np.float) - self.target_array.astype(np.float))
 
     def resolve(self, x):
+        xs, ys, xxs, yys, rotations, scales = x
+        xs, ys, xxs, yys, rotations = [a.astype(np.int) for a in [xs, ys, xxs, yys, rotations]]
+
         total = np.zeros(self.target_array.shape)
         count = np.zeros(self.target_array.shape)
-        for x, y, xx, yy in np.stack(x).T.astype(np.int):
-            total[yy: yy + self.patch_size, xx: xx + self.patch_size] += \
-                self.seed_array[y: y + self.patch_size, x: x + self.patch_size]
-            count[yy: yy + self.patch_size, xx: xx + self.patch_size] += 1
+        for idx in range(self.n_patches):
+            x, y, xx, yy, rotation, scale = xs[idx], ys[idx], xxs[idx], yys[idx], rotations[idx], scales[idx]
+            patch = self.seed_array[y: y + self.patch_size, x: x + self.patch_size]
+            patch = resize_patch(patch, scale)
+            patch = rotate_patch(patch, rotation)
+
+            h, w, _ = total.shape
+            ph, pw, _ = patch.shape
+            total[yy: yy + ph, xx: xx + pw] += patch[0: min(ph, h - yy), 0: min(pw, w - xx)]
+            count[yy: yy + ph, xx: xx + pw] += 1
 
         total[total == 0] = np.nan
         count[count == 0] = np.nan
@@ -107,7 +144,7 @@ def main():
     objective = ImageSimilarityObjective()
     parameters = objective.initialise_parameters()
 
-    optimizer = ng.optimizers.NGOpt(parametrization=parameters, budget=50_000, num_workers=14)
+    optimizer = ng.optimizers.NGOpt(parametrization=parameters, budget=50_000, num_workers=6)
     optimizer.register_callback("tell", objective.log)
 
     with futures.ThreadPoolExecutor(max_workers=optimizer.num_workers) as executor:
