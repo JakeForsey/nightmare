@@ -52,21 +52,17 @@ class ImageSimilarityObjective:
         h, w, c = self.seed_array.shape
         seed_x = ng.p.Array(
             init=np.random.randint(0, w - self.patch_size, self.n_patches),
-            mutable_sigma=True,
         ).set_bounds(0, w - self.patch_size).set_integer_casting().set_mutation(sigma=100)
         seed_y = ng.p.Array(
             init=np.random.randint(0, h - self.patch_size, self.n_patches),
-            mutable_sigma=True,
         ).set_bounds(0, h - self.patch_size).set_integer_casting().set_mutation(sigma=100)
 
         h, w, c = self.target_array.shape
         target_x = ng.p.Array(
             init=np.random.randint(0, w - self.patch_size, self.n_patches),
-            mutable_sigma=True,
         ).set_bounds(0, w - self.patch_size).set_integer_casting().set_mutation(sigma=100)
         target_y = ng.p.Array(
             init=np.random.randint(0, h - self.patch_size, self.n_patches),
-            mutable_sigma=True,
         ).set_bounds(0, h - self.patch_size).set_integer_casting().set_mutation(sigma=100)
 
         target_rotation = ng.p.Array(
